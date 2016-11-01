@@ -1,15 +1,15 @@
 package main
 
 import (
-	"github.com/lib/pq"
 	_ "database/sql"
-	"github.com/jmoiron/sqlx"
-	"log"
 	"fmt"
-	"os"
+	"log"
 	"encoding/json"
 	"io/ioutil"
-//	"github.com/gdey/sql2json"
+	"os"
+	
+	"github.com/jmoiron/sqlx"
+	"github.com/lib/pq"
 )
 
 var schema = `
@@ -31,6 +31,39 @@ type Contacts struct {
 	Contacts []Contact `json:"contacts"`
 }
 
+func (c *Contacts) createFromJSON(json_str []byte) error {
+	b := []byte(json_str)
+	err := json.Unmarshal(b, &c)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	return err
+}
+
+func (c *Contacts) save(db *sqlx.DB) error {
+	tx := db.MustBegin()
+	stmt, _ := tx.Preparex(pq.CopyIn("contact", "first_name", "last_name", "email"))
+	
+	for _, contact := range c.Contacts {
+		tx.Exec(contact.First_name, contact.Last_name, contact.Email)
+	}
+	_, err := stmt.Exec()
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	err = stmt.Close()
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+	
+	tx.Commit()
+	
+	return nil
+}
+
 func connect() (*sqlx.DB, error) {
 	db, err := sqlx.Connect("postgres", "user=pqgotest dbname=pqgotest sslmode=disable")
 	if err != nil {
@@ -45,20 +78,6 @@ func createTables(db *sqlx.DB) {
 	db.MustExec(schema)
 }
 
-func createContactsFromJSON(json_str string) ([]Contact, error) {
-	b := []byte(json_str)
-	var m Contacts
-	err := json.Unmarshal(b, &m)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return m.Contacts, err
-}
-
-func (c *Contact) save(tx *sqlx.Stmt) {
-	tx.Exec(c.First_name, c.Last_name, c.Email)
-}
 
 func main() {
 	db, err := connect()
@@ -67,7 +86,7 @@ func main() {
 	}
 
 	createTables(db)
-	file, e := ioutil.ReadFile("./contacts.json")
+	contactsJson, e := ioutil.ReadFile("./contacts.json")
 	if e != nil {
 		fmt.Printf("File error: %v\n", e)
 		os.Exit(1)
@@ -75,21 +94,14 @@ func main() {
 
 	tx := db.MustBegin()
 	tx.MustExec("DELETE FROM contact")
-	contacts, _ := createContactsFromJSON(string(file))
-	stmt, _ := tx.Preparex(pq.CopyIn("contact", "first_name", "last_name", "email"))
-	for _, contact := range contacts {
-		contact.save(stmt)
-	}
-	_, err = stmt.Exec()
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = stmt.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
-	
 	tx.Commit()
+	
+	contacts := new(Contacts)
+	
+	contacts.createFromJSON(contactsJson)
+	
+	contacts.save(db)
+	
 
 	people := []Contact{}
 	db.Select(&people, "SELECT * FROM contact ORDER BY email,id ASC")
