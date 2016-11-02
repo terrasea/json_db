@@ -43,6 +43,7 @@ func (c *Contacts) createFromJSON(json_str []byte) error {
 
 func (c *Contacts) save(db *sqlx.DB) error {
 	tx := db.MustBegin()
+
 	stmt, _ := tx.Preparex(pq.CopyIn("contact", "first_name", "last_name", "email"))
 	
 	for _, contact := range c.Contacts {
@@ -102,11 +103,10 @@ func main() {
 	
 	contacts.save(db)
 	
-
-	people := []Contact{}
-	db.Select(&people, "SELECT * FROM contact ORDER BY email,id ASC")
+	people := new(Contacts)
+	db.Select(people.Contacts, "SELECT * FROM contact ORDER BY email,id ASC")
 	//jason, john := people[0], people[1]
-	for _, contact := range people {
+	for _, contact := range people.Contacts {
 		contact_json, err := json.Marshal(contact)
 		if err != nil {
 			log.Fatal(err)
